@@ -11,6 +11,7 @@ export const Scanner: React.FC = () => {
   const [status, setStatus] = useState<ProcessingStatus>('idle');
   const [extractedData, setExtractedData] = useState<ExtractedEntry[]>([]);
   const [meetingDate, setMeetingDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const { addOrUpdateMembers } = useData();
   const navigate = useNavigate();
 
@@ -26,6 +27,7 @@ export const Scanner: React.FC = () => {
       reader.readAsDataURL(selectedFile);
       setStatus('idle');
       setExtractedData([]);
+      setErrorMessage('');
     }
   };
 
@@ -33,14 +35,15 @@ export const Scanner: React.FC = () => {
     if (!file) return;
 
     setStatus('processing');
+    setErrorMessage('');
     try {
-      // The service now handles the API key internally via process.env.API_KEY
       const data = await parseNetworkingSheet(file);
       setExtractedData(data);
       setStatus('review');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setStatus('error');
+      setErrorMessage(error.message || "Error desconocido");
     }
   };
 
@@ -110,9 +113,12 @@ export const Scanner: React.FC = () => {
         </div>
         
         {status === 'error' && (
-             <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg flex items-center gap-2">
-                 <AlertCircle className="w-5 h-5" />
-                 Error al procesar la imagen. Verifica que la API Key esté configurada en Vercel.
+             <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg flex items-start gap-2">
+                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                 <div>
+                   <p className="font-medium">Error al procesar la imagen</p>
+                   <p className="text-sm mt-1">{errorMessage.includes("API Key") ? "Falta configuración en Vercel: Añade la variable VITE_API_KEY." : errorMessage}</p>
+                 </div>
              </div>
         )}
       </div>

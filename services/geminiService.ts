@@ -40,13 +40,45 @@ const RESPONSE_SCHEMA: Schema = {
   },
 };
 
+// Helper function to robustly get the API Key in various environments (Vite, CRA, etc.)
+const getApiKey = (): string | undefined => {
+  // 1. Try Vite standard (import.meta.env)
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {
+    // Ignore errors if import.meta is not supported
+  }
+
+  // 2. Try Create React App standard (process.env.REACT_APP_*)
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_KEY) {
+      return process.env.REACT_APP_API_KEY;
+    }
+  } catch (e) {}
+
+  // 3. Try generic Node/Custom (process.env.API_KEY)
+  // Note: Most bundlers won't expose this to the browser unless configured
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {}
+
+  return undefined;
+};
+
 export const parseNetworkingSheet = async (
   file: File
 ): Promise<ExtractedEntry[]> => {
-  const apiKey = process.env.API_KEY;
+  const apiKey = getApiKey();
   
   if (!apiKey) {
-    throw new Error("API Key is not configured in environment variables.");
+    console.error("API Key not found. Checked VITE_API_KEY, REACT_APP_API_KEY, and API_KEY.");
+    throw new Error("La API Key no está configurada. En Vercel, asegúrate de llamar a la variable 'VITE_API_KEY'.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
