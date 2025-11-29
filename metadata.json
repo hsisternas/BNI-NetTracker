@@ -1,0 +1,7 @@
+{
+  "name": "BNI NetTracker",
+  "description": "Digitize weekly networking meeting sheets, track member attendance, and archive handwritten referral requests using Gemini Vision.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
