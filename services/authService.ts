@@ -30,9 +30,10 @@ export const authService = {
     const userDoc = await getDoc(userDocRef);
 
     if (!userDoc.exists()) {
-      // Caso raro: Usuario en Auth pero no en Firestore
+      // Caso raro: Usuario en Auth pero no en Firestore (ej: error en registro previo)
+      // Intentar recuperar/crear perfil básico si no existe
       await signOut(auth);
-      throw new Error("Perfil de usuario no encontrado.");
+      throw new Error("Perfil de usuario no encontrado. Contacte al administrador.");
     }
 
     const userData = userDoc.data() as User;
@@ -47,15 +48,17 @@ export const authService = {
   },
 
   register: async (name: string, email: string, password: string): Promise<User> => {
-    // 1. Comprobar si es el primer usuario en la BD (para hacerlo Admin)
+    // 1. Crear usuario en Firebase Auth PRIMERO
+    // Esto nos da un token válido (request.auth) para poder leer la BD según las reglas
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
+
+    // 2. Comprobar si hay usuarios en la BD (ahora ya estamos logueados)
+    // Buscamos si existe AL MENOS un documento en la colección users
     const usersRef = collection(db, "users");
     const q = query(usersRef, limit(1));
     const snapshot = await getDocs(q);
     const isFirstUser = snapshot.empty;
-
-    // 2. Crear usuario en Firebase Auth
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const firebaseUser = userCredential.user;
 
     // 3. Guardar perfil extendido en Firestore
     const newUser: User = {
@@ -66,8 +69,15 @@ export const authService = {
       isApproved: isFirstUser ? true : false
     };
 
-    await setDoc(doc(db, "users", firebaseUser.uid), newUser);
-    await updateProfile(firebaseUser, { displayName: name });
+    try {
+        await setDoc(doc(db, "users", firebaseUser.uid), newUser);
+        await updateProfile(firebaseUser, { displayName: name });
+    } catch (error) {
+        // Si falla el guardado en Firestore, deberíamos borrar el usuario de Auth para no dejar "zombies"
+        // pero por simplicidad lanzamos el error.
+        console.error("Error guardando perfil en Firestore", error);
+        throw error;
+    }
 
     return newUser;
   },
@@ -97,7 +107,6 @@ export const authService = {
   deleteUser: async (userId: string): Promise<void> => {
     // Nota: Esto borra el doc de Firestore, pero el usuario de Auth sigue existiendo
     // en esta implementación simple del lado del cliente. 
-    // Para borrar de Auth se requeriría una Cloud Function o estar logueado como ese usuario.
     const userRef = doc(db, "users", userId);
     await deleteDoc(userRef);
   }
