@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Camera, Upload, Loader2, ArrowRight, AlertCircle, FileText } from 'lucide-react';
 import { parseNetworkingSheet } from '../services/geminiService';
@@ -12,6 +13,7 @@ export const Scanner: React.FC = () => {
   const [extractedData, setExtractedData] = useState<ExtractedEntry[]>([]);
   const [meetingDate, setMeetingDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [isSaving, setIsSaving] = useState(false);
   const { addOrUpdateMembers } = useData();
   const navigate = useNavigate();
 
@@ -47,12 +49,20 @@ export const Scanner: React.FC = () => {
     }
   };
 
-  const handleConfirm = () => {
-    addOrUpdateMembers(extractedData, meetingDate);
-    setStatus('success');
-    setTimeout(() => {
-      navigate('/summary');
-    }, 1500);
+  const handleConfirm = async () => {
+    setIsSaving(true);
+    try {
+      await addOrUpdateMembers(extractedData, meetingDate);
+      setStatus('success');
+      setTimeout(() => {
+        navigate('/summary');
+      }, 1500);
+    } catch (error) {
+      console.error(error);
+      alert("Error al guardar los datos en la base de datos.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleEntryChange = (index: number, field: keyof ExtractedEntry, value: string) => {
@@ -181,10 +191,29 @@ export const Scanner: React.FC = () => {
            </div>
 
            <div className="mt-6 flex justify-end gap-3">
-               <button onClick={() => setStatus('idle')} className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancelar</button>
-               <button onClick={handleConfirm} className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm">
-                   Confirmar y Guardar
-                   <ArrowRight className="w-4 h-4" />
+               <button 
+                  onClick={() => setStatus('idle')} 
+                  disabled={isSaving}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+               >
+                 Cancelar
+               </button>
+               <button 
+                  onClick={handleConfirm} 
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+               >
+                   {isSaving ? (
+                     <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Guardando...
+                     </>
+                   ) : (
+                     <>
+                        Confirmar y Guardar
+                        <ArrowRight className="w-4 h-4" />
+                     </>
+                   )}
                </button>
            </div>
         </div>

@@ -1,144 +1,104 @@
 
-import { User } from '../types';
-
-const USERS_STORAGE_KEY = 'networking_app_users_v1';
-const SESSION_KEY = 'networking_app_session_v1';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut,
+  updateProfile
+} from "firebase/auth";
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  collection, 
+  updateDoc, 
+  deleteDoc,
+  query,
+  limit 
+} from "firebase/firestore";
+import { auth, db } from "../firebaseConfig";
+import { User } from "../types";
 
 export const authService = {
   login: async (email: string, password: string): Promise<User> => {
-    // Simular delay de red
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 1. Autenticar con Firebase Auth
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
 
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    const users = usersStr ? JSON.parse(usersStr) : [];
-    
-    // Buscar usuario
-    const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    
-    if (!user) {
-      throw new Error('Credenciales inválidas');
+    // 2. Obtener datos extra del usuario (rol, aprobación) de Firestore
+    const userDocRef = doc(db, "users", firebaseUser.uid);
+    const userDoc = await getDoc(userDocRef);
+
+    if (!userDoc.exists()) {
+      // Caso raro: Usuario en Auth pero no en Firestore
+      await signOut(auth);
+      throw new Error("Perfil de usuario no encontrado.");
     }
 
-    if (!user.isApproved) {
+    const userData = userDoc.data() as User;
+
+    // 3. Verificar aprobación
+    if (!userData.isApproved) {
+      await signOut(auth);
       throw new Error('Tu cuenta está pendiente de aprobación por el administrador.');
     }
 
-    const safeUser: User = { 
-        id: user.id, 
-        email: user.email, 
-        name: user.name,
-        role: user.role || 'user',
-        isApproved: user.isApproved
-    };
-    
-    localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-    return safeUser;
+    return userData;
   },
 
   register: async (name: string, email: string, password: string): Promise<User> => {
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 1. Comprobar si es el primer usuario en la BD (para hacerlo Admin)
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, limit(1));
+    const snapshot = await getDocs(q);
+    const isFirstUser = snapshot.empty;
 
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    const users = usersStr ? JSON.parse(usersStr) : [];
+    // 2. Crear usuario en Firebase Auth
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
 
-    if (users.find((u: any) => u.email.toLowerCase() === email.toLowerCase())) {
-      throw new Error('El correo electrónico ya está registrado');
-    }
-
-    // El primer usuario registrado es Admin automáticamente
-    const isFirstUser = users.length === 0;
-    
-    const newUser = {
-      id: Date.now().toString() + Math.random().toString().slice(2, 8),
-      name,
-      email,
-      password, // Nota: En producción real, esto debería estar hasheado en un backend real.
+    // 3. Guardar perfil extendido en Firestore
+    const newUser: User = {
+      id: firebaseUser.uid,
+      name: name,
+      email: email,
       role: isFirstUser ? 'admin' : 'user',
       isApproved: isFirstUser ? true : false
     };
 
-    users.push(newUser);
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    await setDoc(doc(db, "users", firebaseUser.uid), newUser);
+    await updateProfile(firebaseUser, { displayName: name });
 
-    const safeUser: User = { 
-        id: newUser.id, 
-        email: newUser.email, 
-        name: newUser.name,
-        role: newUser.role as 'admin' | 'user',
-        isApproved: newUser.isApproved
-    };
-
-    // Solo iniciar sesión automáticamente si está aprobado (es decir, es el admin)
-    if (safeUser.isApproved) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(safeUser));
-    }
-    
-    return safeUser;
+    return newUser;
   },
 
-  logout: () => {
-    localStorage.removeItem(SESSION_KEY);
-  },
-
-  getCurrentUser: (): User | null => {
-    const sessionStr = localStorage.getItem(SESSION_KEY);
-    return sessionStr ? JSON.parse(sessionStr) : null;
+  logout: async () => {
+    await signOut(auth);
   },
 
   // --- Métodos de Administración ---
 
   getAllUsers: async (): Promise<User[]> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    const users = usersStr ? JSON.parse(usersStr) : [];
-    return users.map((u: any) => ({
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      role: u.role,
-      isApproved: u.isApproved
-    }));
+    const usersRef = collection(db, "users");
+    const snapshot = await getDocs(usersRef);
+    return snapshot.docs.map(doc => doc.data() as User);
   },
 
   approveUser: async (userId: string): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    let users = usersStr ? JSON.parse(usersStr) : [];
-    
-    // Forzamos comparación de strings para evitar errores de tipo
-    users = users.map((u: any) => {
-        if (String(u.id) === String(userId)) {
-            return { ...u, isApproved: true };
-        }
-        return u;
-    });
-
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { isApproved: true });
   },
 
   suspendUser: async (userId: string): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    let users = usersStr ? JSON.parse(usersStr) : [];
-    
-    users = users.map((u: any) => {
-        if (String(u.id) === String(userId)) {
-            return { ...u, isApproved: false };
-        }
-        return u;
-    });
-
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { isApproved: false });
   },
 
   deleteUser: async (userId: string): Promise<void> => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    let users = usersStr ? JSON.parse(usersStr) : [];
-    
-    // Filtrar eliminando el ID coincidente
-    users = users.filter((u: any) => String(u.id) !== String(userId));
-
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    // Nota: Esto borra el doc de Firestore, pero el usuario de Auth sigue existiendo
+    // en esta implementación simple del lado del cliente. 
+    // Para borrar de Auth se requeriría una Cloud Function o estar logueado como ese usuario.
+    const userRef = doc(db, "users", userId);
+    await deleteDoc(userRef);
   }
 };
