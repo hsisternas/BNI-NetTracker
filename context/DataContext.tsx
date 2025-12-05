@@ -82,17 +82,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const scanData: ProcessedSheetResult = { date, entries };
     await setDoc(doc(db, "lastScans", user.id), scanData);
 
-    // 2. Procesar Miembros (Batch logic manual)
-    // Nota: Firestore tiene límites de escritura en batch. Aquí lo hacemos iterativo 
-    // pero optimizado para lecturas locales previas.
-    
+    // 2. Procesar Miembros
     // Crear mapa de miembros actuales para búsqueda rápida
     const membersMap = new Map<string, Member>(
       members.map(m => [m.id, m])
     );
 
     for (const entry of entries) {
-      const normalizedId = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
+      // GENERACIÓN DE ID ÚNICO: userId + nombre normalizado
+      // Esto evita colisiones entre usuarios diferentes que tienen miembros con el mismo nombre.
+      const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
+      const normalizedId = `${user.id}_${cleanName}`;
+
       const existingMember = membersMap.get(normalizedId);
 
       const newReference: Reference | null = entry.handwrittenRequest && entry.handwrittenRequest.trim().length > 0 
@@ -120,7 +121,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           sector: entry.sector || existingMember.sector,
           phone: entry.phone || existingMember.phone,
           references: updatedRefs,
-          userId: user.id // Asegurar propiedad
+          userId: user.id
         };
 
         // Guardar en Firestore
@@ -177,7 +178,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Sincronizar con el perfil del miembro en Firestore
     const entry = updatedEntries[index];
-    const normalizedId = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
+    
+    // GENERACIÓN DE ID ÚNICO (Misma lógica que en addOrUpdateMembers)
+    const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
+    const normalizedId = `${user.id}_${cleanName}`;
+
     const member = members.find(m => m.id === normalizedId);
 
     if (member) {
@@ -210,8 +215,6 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearAll = useCallback(async () => {
     if (!user) return;
     if(window.confirm("¿Seguro que quieres borrar todos los datos de tu cuenta?")) {
-      // Nota: Borrar colecciones enteras desde cliente no es recomendado en producción masiva,
-      // pero para esta escala funciona iterando.
       
       // 1. Borrar Last Scan
       await deleteDoc(doc(db, "lastScans", user.id));
@@ -219,7 +222,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // 2. Borrar miembros
       const membersRef = collection(db, "members");
       const q = query(membersRef, where("userId", "==", user.id));
-      const snapshot = await getDocs(q); // Usamos getDocs directos aquí para iterar y borrar
+      const snapshot = await getDocs(q); 
       
       const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
