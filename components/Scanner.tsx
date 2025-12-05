@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Camera, Upload, Loader2, ArrowRight, AlertCircle, FileText, UserCheck, UserPlus } from 'lucide-react';
+import { Camera, Upload, Loader2, ArrowRight, AlertCircle, FileText, UserCheck, UserPlus, Building2, MessageSquare, User } from 'lucide-react';
 import { parseNetworkingSheet } from '../services/geminiService';
 import { ExtractedEntry, ProcessingStatus } from '../types';
 import { useData } from '../context/DataContext';
@@ -57,9 +57,10 @@ export const Scanner: React.FC = () => {
       setTimeout(() => {
         navigate('/summary');
       }, 1500);
-    } catch (error) {
-      console.error(error);
-      alert("Error al guardar los datos en la base de datos.");
+    } catch (error: any) {
+      console.error("Error saving data:", error);
+      const msg = error.message || JSON.stringify(error);
+      alert(`Error al guardar en la base de datos: ${msg}. Verifica tu conexión y permisos.`);
     } finally {
       setIsSaving(false);
     }
@@ -151,7 +152,8 @@ export const Scanner: React.FC = () => {
                 <span className="text-xs text-gray-500 bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Edita si es necesario</span>
            </div>
            
-           <div className="overflow-x-auto">
+           {/* DESKTOP VIEW: Table */}
+           <div className="hidden md:block overflow-x-auto">
              <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                     <tr>
@@ -202,7 +204,6 @@ export const Scanner: React.FC = () => {
                                             {members.map(m => (
                                                 <option key={m.id} value={m.name}>{m.name}</option>
                                             ))}
-                                            {/* Allow keeping raw text if no match */}
                                             {entry.invitedByName && !members.find(m => m.name === entry.invitedByName) && (
                                                 <option value={entry.invitedByName}>{entry.invitedByName} (Texto detectado)</option>
                                             )}
@@ -224,7 +225,84 @@ export const Scanner: React.FC = () => {
              </table>
            </div>
 
-           <div className="mt-6 flex justify-end gap-3">
+           {/* MOBILE VIEW: Cards */}
+           <div className="md:hidden space-y-4">
+              {extractedData.map((entry, idx) => (
+                  <div key={idx} className={`border rounded-lg p-4 shadow-sm flex flex-col gap-3 ${entry.isGuest ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+                      {/* Header: Toggle & Name */}
+                      <div className="flex items-start gap-3">
+                          <button 
+                              onClick={() => toggleGuest(idx)}
+                              className={`p-3 rounded-lg shrink-0 transition-colors ${entry.isGuest ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                          >
+                              {entry.isGuest ? <UserPlus className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+                              <span className="sr-only">{entry.isGuest ? "Es Invitado" : "Es Miembro"}</span>
+                          </button>
+                          <div className="flex-1 min-w-0">
+                              <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Nombre</label>
+                              <input 
+                                  value={entry.name} 
+                                  onChange={(e) => handleEntryChange(idx, 'name', e.target.value)}
+                                  className="w-full border-gray-300 rounded-md p-2 focus:ring-primary-500 focus:border-primary-500 font-medium text-gray-900 border shadow-sm"
+                                  placeholder="Nombre completo"
+                              />
+                          </div>
+                      </div>
+
+                      {/* Company Field */}
+                      <div>
+                          <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                              <Building2 className="w-3 h-3" /> Empresa
+                          </label>
+                          <input 
+                              value={entry.company} 
+                              onChange={(e) => handleEntryChange(idx, 'company', e.target.value)}
+                              className="w-full border-gray-300 rounded-md p-2 text-gray-700 border shadow-sm"
+                              placeholder="Nombre de la empresa"
+                          />
+                      </div>
+
+                      {/* Dynamic Field: Reference or Inviter */}
+                      <div>
+                          {entry.isGuest ? (
+                              <>
+                                  <label className="text-xs font-bold text-amber-600 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                                      <User className="w-3 h-3" /> Invitado Por
+                                  </label>
+                                  <select 
+                                      value={entry.invitedByName || ""} 
+                                      onChange={(e) => handleEntryChange(idx, 'invitedByName', e.target.value)}
+                                      className="w-full border-amber-300 rounded-md p-2 text-sm bg-white border shadow-sm"
+                                  >
+                                      <option value="">-- Seleccionar Miembro --</option>
+                                      {members.map(m => (
+                                          <option key={m.id} value={m.name}>{m.name}</option>
+                                      ))}
+                                      {entry.invitedByName && !members.find(m => m.name === entry.invitedByName) && (
+                                          <option value={entry.invitedByName}>{entry.invitedByName} (Texto detectado)</option>
+                                      )}
+                                  </select>
+                              </>
+                          ) : (
+                              <>
+                                  <label className="text-xs font-bold text-green-600 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                                      <MessageSquare className="w-3 h-3" /> Referencias Deseadas
+                                  </label>
+                                  <textarea 
+                                      value={entry.handwrittenRequest} 
+                                      onChange={(e) => handleEntryChange(idx, 'handwrittenRequest', e.target.value)}
+                                      className={`w-full border rounded-md p-2 text-sm shadow-sm ${entry.handwrittenRequest ? 'bg-green-50 border-green-200 text-green-900' : 'bg-gray-50 border-gray-300 text-gray-500'}`}
+                                      rows={3}
+                                      placeholder="Escribe aquí las referencias solicitadas..."
+                                  />
+                              </>
+                          )}
+                      </div>
+                  </div>
+              ))}
+           </div>
+
+           <div className="mt-6 flex justify-end gap-3 sticky bottom-0 bg-white p-4 border-t md:static md:border-0 md:p-0 md:bg-transparent z-10">
                <button 
                   onClick={() => setStatus('idle')} 
                   disabled={isSaving}

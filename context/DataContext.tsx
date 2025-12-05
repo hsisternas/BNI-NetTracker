@@ -31,6 +31,12 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
+// Helper to sanitize IDs for Firestore (only alphanumeric and dashes)
+const generateSafeId = (userId: string, name: string) => {
+  const cleanName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `${userId}_${cleanName}`;
+};
+
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
@@ -95,21 +101,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return;
 
     // 1. Guardar Last Scan en Firestore
-    const scanData: ProcessedSheetResult = { date, entries };
+    // Aseguramos que no hay undefined en el objeto
+    const cleanEntries = entries.map(e => ({
+      ...e,
+      company: e.company || "",
+      sector: e.sector || "",
+      phone: e.phone || "",
+      handwrittenRequest: e.handwrittenRequest || "",
+      invitedByName: e.invitedByName || ""
+    }));
+
+    const scanData: ProcessedSheetResult = { date, entries: cleanEntries };
     await setDoc(doc(db, "lastScans", user.id), scanData);
 
     // 2. Procesar Entradas (Miembros o Invitados)
-    const membersMap = new Map<string, Member>(
-      members.map(m => [m.id, m])
-    );
+    // Crear un mapa para búsqueda rápida, usando el ID sanitizado
+    const membersMap = new Map<string, Member>();
+    members.forEach(m => membersMap.set(m.id, m));
 
     for (const entry of entries) {
-      const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
-      const normalizedId = `${user.id}_${cleanName}`;
+      if (!entry.name) continue; // Skip empty names
 
       if (entry.isGuest) {
         // --- LÓGICA DE INVITADOS ---
-        // Buscar el ID del miembro que invitó
         let inviterId = "";
         let inviterName = entry.invitedByName || "";
         
@@ -125,9 +139,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: Date.now().toString() + Math.random().toString().slice(2),
             userId: user.id,
             name: entry.name,
-            company: entry.company,
-            sector: entry.sector,
-            phone: entry.phone,
+            company: entry.company || "",
+            sector: entry.sector || "",
+            phone: entry.phone || "",
             visitDate: date,
             invitedByMemberId: inviterId,
             invitedByMemberName: inviterName
@@ -138,6 +152,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       } else {
         // --- LÓGICA DE MIEMBROS ---
+        const normalizedId = generateSafeId(user.id, entry.name);
         const existingMember = membersMap.get(normalizedId);
 
         const newReference: Reference | null = entry.handwrittenRequest && entry.handwrittenRequest.trim().length > 0 
@@ -174,9 +189,9 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: normalizedId,
             userId: user.id,
             name: entry.name,
-            company: entry.company,
-            sector: entry.sector,
-            phone: entry.phone,
+            company: entry.company || "",
+            sector: entry.sector || "",
+            phone: entry.phone || "",
             createdAt: new Date().toISOString(),
             references: newReference ? [newReference] : []
           };
@@ -220,8 +235,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Sincronizar si es Miembro (Los invitados no se editan desde aquí por ahora)
     const entry = updatedEntries[index];
     if (!entry.isGuest) {
-        const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
-        const normalizedId = `${user.id}_${cleanName}`;
+        const normalizedId = generateSafeId(user.id, entry.name);
         const member = members.find(m => m.id === normalizedId);
 
         if (member) {
