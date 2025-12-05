@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { ExtractedEntry } from "../types";
 
@@ -12,12 +13,15 @@ The sheet typically has columns:
 4. Contact/Phone
 5. "Referencias Deseadas" (Desired References) - This is where HANDWRITTEN notes usually appear.
 
+Sometimes there is a section for "Guests" or "Invitados". These rows often indicate who invited them (e.g., "Invitado por Juan").
+
 Instructions:
 1. Identify every row in the list.
 2. Extract the Name and Company from the first column.
 3. Extract the Sector/Specialty.
 4. Extract the Phone number.
-5. CRITICAL: Transcription of Handwritten Notes. Look carefully at the right side of the page or over the row. 
+5. Check if the row belongs to a GUEST. Guests usually don't have handwritten reference requests, but they might have an "Invited By" note.
+6. CRITICAL: Transcription of Handwritten Notes. Look carefully at the right side of the page or over the row. 
    - Transcribe the handwritten text associated with that row.
    - If there is no handwriting for a row, return an empty string.
    - The handwriting represents the "Reference Request" for the week.
@@ -35,6 +39,8 @@ const RESPONSE_SCHEMA: Schema = {
       sector: { type: Type.STRING },
       phone: { type: Type.STRING },
       handwrittenRequest: { type: Type.STRING, description: "The handwritten text found for this row" },
+      isGuest: { type: Type.BOOLEAN, description: "True if this row appears to be a guest/visitor" },
+      invitedByName: { type: Type.STRING, description: "Name of the member who invited this guest, if visible" }
     },
     required: ["name", "sector", "handwrittenRequest"],
   },
@@ -98,7 +104,7 @@ export const parseNetworkingSheet = async (
             },
           },
           {
-            text: "Extract the table data from this image. Focus on capturing the handwritten notes in the 'Referencias Deseadas' area for each person.",
+            text: "Extract the table data from this image. Focus on capturing the handwritten notes in the 'Referencias Deseadas' area for each person. Also identify if any rows are Guests.",
           },
         ],
       },

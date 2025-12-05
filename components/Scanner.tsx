@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Camera, Upload, Loader2, ArrowRight, AlertCircle, FileText } from 'lucide-react';
+import { Camera, Upload, Loader2, ArrowRight, AlertCircle, FileText, UserCheck, UserPlus } from 'lucide-react';
 import { parseNetworkingSheet } from '../services/geminiService';
 import { ExtractedEntry, ProcessingStatus } from '../types';
 import { useData } from '../context/DataContext';
@@ -14,7 +14,7 @@ export const Scanner: React.FC = () => {
   const [meetingDate, setMeetingDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
-  const { addOrUpdateMembers } = useData();
+  const { addOrUpdateMembers, members } = useData();
   const navigate = useNavigate();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,10 +65,20 @@ export const Scanner: React.FC = () => {
     }
   };
 
-  const handleEntryChange = (index: number, field: keyof ExtractedEntry, value: string) => {
+  const handleEntryChange = (index: number, field: keyof ExtractedEntry, value: any) => {
     const updated = [...extractedData];
     // @ts-ignore
     updated[index][field] = value;
+    setExtractedData(updated);
+  };
+
+  const toggleGuest = (index: number) => {
+    const updated = [...extractedData];
+    updated[index].isGuest = !updated[index].isGuest;
+    // Reset or guess inviter if switching to guest
+    if (updated[index].isGuest && !updated[index].invitedByName) {
+        updated[index].invitedByName = "";
+    }
     setExtractedData(updated);
   };
 
@@ -145,20 +155,30 @@ export const Scanner: React.FC = () => {
              <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                     <tr>
-                        <th className="px-3 py-3 text-left font-medium text-gray-500">Miembro</th>
+                        <th className="px-3 py-3 text-left font-medium text-gray-500 w-16">Tipo</th>
+                        <th className="px-3 py-3 text-left font-medium text-gray-500">Nombre</th>
                         <th className="px-3 py-3 text-left font-medium text-gray-500">Empresa</th>
-                        <th className="px-3 py-3 text-left font-medium text-gray-500">Sector</th>
-                        <th className="px-3 py-3 text-left font-medium text-gray-500 w-1/3">Ref. Solicitada (Escrito a mano)</th>
+                        <th className="px-3 py-3 text-left font-medium text-gray-500 w-1/3">Info Adicional</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
                     {extractedData.map((entry, idx) => (
-                        <tr key={idx}>
+                        <tr key={idx} className={entry.isGuest ? "bg-amber-50" : ""}>
+                            <td className="px-3 py-2 text-center">
+                                <button 
+                                    onClick={() => toggleGuest(idx)}
+                                    className={`p-1.5 rounded-md transition-colors ${entry.isGuest ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                                    title={entry.isGuest ? "Es Invitado" : "Es Miembro"}
+                                >
+                                    {entry.isGuest ? <UserPlus className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                </button>
+                            </td>
                             <td className="px-3 py-2">
                                 <input 
                                     value={entry.name} 
                                     onChange={(e) => handleEntryChange(idx, 'name', e.target.value)}
                                     className="w-full border-gray-300 rounded p-1 focus:ring-primary-500 focus:border-primary-500"
+                                    placeholder="Nombre"
                                 />
                             </td>
                              <td className="px-3 py-2">
@@ -166,23 +186,37 @@ export const Scanner: React.FC = () => {
                                     value={entry.company} 
                                     onChange={(e) => handleEntryChange(idx, 'company', e.target.value)}
                                     className="w-full border-gray-300 rounded p-1 text-gray-500"
-                                />
-                            </td>
-                             <td className="px-3 py-2">
-                                <input 
-                                    value={entry.sector} 
-                                    onChange={(e) => handleEntryChange(idx, 'sector', e.target.value)}
-                                    className="w-full border-gray-300 rounded p-1 text-gray-500"
+                                    placeholder="Empresa"
                                 />
                             </td>
                             <td className="px-3 py-2">
-                                <textarea 
-                                    value={entry.handwrittenRequest} 
-                                    onChange={(e) => handleEntryChange(idx, 'handwrittenRequest', e.target.value)}
-                                    className={`w-full border rounded p-1 text-sm ${entry.handwrittenRequest ? 'bg-green-50 border-green-200 text-green-800 font-medium' : 'bg-gray-50 text-gray-400'}`}
-                                    rows={2}
-                                    placeholder="Sin referencias"
-                                />
+                                {entry.isGuest ? (
+                                    <div className="flex flex-col">
+                                        <span className="text-xs text-gray-500 mb-1">Invitado por:</span>
+                                        <select 
+                                            value={entry.invitedByName || ""} 
+                                            onChange={(e) => handleEntryChange(idx, 'invitedByName', e.target.value)}
+                                            className="w-full border-amber-300 rounded p-1 text-sm bg-white"
+                                        >
+                                            <option value="">-- Seleccionar Miembro --</option>
+                                            {members.map(m => (
+                                                <option key={m.id} value={m.name}>{m.name}</option>
+                                            ))}
+                                            {/* Allow keeping raw text if no match */}
+                                            {entry.invitedByName && !members.find(m => m.name === entry.invitedByName) && (
+                                                <option value={entry.invitedByName}>{entry.invitedByName} (Texto detectado)</option>
+                                            )}
+                                        </select>
+                                    </div>
+                                ) : (
+                                    <textarea 
+                                        value={entry.handwrittenRequest} 
+                                        onChange={(e) => handleEntryChange(idx, 'handwrittenRequest', e.target.value)}
+                                        className={`w-full border rounded p-1 text-sm ${entry.handwrittenRequest ? 'bg-green-50 border-green-200 text-green-800 font-medium' : 'bg-gray-50 text-gray-400'}`}
+                                        rows={2}
+                                        placeholder="Referencia solicitada..."
+                                    />
+                                )}
                             </td>
                         </tr>
                     ))}

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Member, ExtractedEntry, Reference, ProcessedSheetResult } from '../types';
+import { Member, ExtractedEntry, Reference, ProcessedSheetResult, Guest } from '../types';
 import { useAuth } from './AuthContext';
 import { db } from '../firebaseConfig';
 import { 
@@ -18,6 +18,7 @@ import {
 
 interface DataContextType {
   members: Member[];
+  guests: Guest[];
   lastScan: ProcessedSheetResult | null;
   addOrUpdateMembers: (entries: ExtractedEntry[], date: string) => Promise<void>;
   getMember: (id: string) => Member | undefined;
@@ -33,6 +34,7 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [lastScan, setLastScan] = useState<ProcessedSheetResult | null>(null);
 
   // --- Sincronización en Tiempo Real con Firestore ---
@@ -40,6 +42,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!user) {
       setMembers([]);
+      setGuests([]);
       setLastScan(null);
       return;
     }
@@ -57,7 +60,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setMembers(fetchedMembers.sort((a, b) => a.name.localeCompare(b.name)));
     });
 
-    // 2. Escuchar Último Escaneo (Guardado en un documento único por usuario)
+    // 2. Escuchar Invitados
+    const guestsRef = collection(db, "guests");
+    const qGuests = query(guestsRef, where("userId", "==", user.id));
+
+    const unsubGuests = onSnapshot(qGuests, (snapshot) => {
+      const fetchedGuests: Guest[] = [];
+      snapshot.forEach((doc) => {
+        fetchedGuests.push(doc.data() as Guest);
+      });
+      setGuests(fetchedGuests.sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime()));
+    });
+
+    // 3. Escuchar Último Escaneo (Guardado en un documento único por usuario)
     const lastScanRef = doc(db, "lastScans", user.id);
     const unsubScan = onSnapshot(lastScanRef, (doc) => {
       if (doc.exists()) {
@@ -69,6 +84,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       unsubMembers();
+      unsubGuests();
       unsubScan();
     };
   }, [user]);
@@ -82,64 +98,90 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const scanData: ProcessedSheetResult = { date, entries };
     await setDoc(doc(db, "lastScans", user.id), scanData);
 
-    // 2. Procesar Miembros
-    // Crear mapa de miembros actuales para búsqueda rápida
+    // 2. Procesar Entradas (Miembros o Invitados)
     const membersMap = new Map<string, Member>(
       members.map(m => [m.id, m])
     );
 
     for (const entry of entries) {
-      // GENERACIÓN DE ID ÚNICO: userId + nombre normalizado
-      // Esto evita colisiones entre usuarios diferentes que tienen miembros con el mismo nombre.
       const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
       const normalizedId = `${user.id}_${cleanName}`;
 
-      const existingMember = membersMap.get(normalizedId);
-
-      const newReference: Reference | null = entry.handwrittenRequest && entry.handwrittenRequest.trim().length > 0 
-        ? {
-            id: Date.now().toString() + Math.random().toString().slice(2),
-            date: date,
-            text: entry.handwrittenRequest.trim(),
-          }
-        : null;
-
-      if (existingMember) {
-        // Lógica de actualización de referencias
-        const hasRefForDate = existingMember.references.some(r => r.date === date);
-        let updatedRefs = existingMember.references;
-
-        if (newReference && !hasRefForDate) {
-            updatedRefs = [newReference, ...existingMember.references];
-        } else if (newReference && hasRefForDate) {
-            updatedRefs = existingMember.references.map(r => r.date === date ? newReference : r);
+      if (entry.isGuest) {
+        // --- LÓGICA DE INVITADOS ---
+        // Buscar el ID del miembro que invitó
+        let inviterId = "";
+        let inviterName = entry.invitedByName || "";
+        
+        if (entry.invitedByName) {
+             const inviter = members.find(m => m.name.toLowerCase().includes(entry.invitedByName?.toLowerCase() || ""));
+             if (inviter) {
+                 inviterId = inviter.id;
+                 inviterName = inviter.name;
+             }
         }
 
-        const updatedMember: Member & { userId: string } = {
-          ...existingMember,
-          company: entry.company || existingMember.company,
-          sector: entry.sector || existingMember.sector,
-          phone: entry.phone || existingMember.phone,
-          references: updatedRefs,
-          userId: user.id
+        const newGuest: Guest = {
+            id: Date.now().toString() + Math.random().toString().slice(2),
+            userId: user.id,
+            name: entry.name,
+            company: entry.company,
+            sector: entry.sector,
+            phone: entry.phone,
+            visitDate: date,
+            invitedByMemberId: inviterId,
+            invitedByMemberName: inviterName
         };
 
-        // Guardar en Firestore
-        await setDoc(doc(db, "members", normalizedId), updatedMember);
+        // Guardar en colección de invitados
+        await setDoc(doc(db, "guests", newGuest.id), newGuest);
 
       } else {
-        // Nuevo Miembro
-        const newMember: Member & { userId: string } = {
-          id: normalizedId,
-          userId: user.id,
-          name: entry.name,
-          company: entry.company,
-          sector: entry.sector,
-          phone: entry.phone,
-          createdAt: new Date().toISOString(),
-          references: newReference ? [newReference] : []
-        };
-        await setDoc(doc(db, "members", normalizedId), newMember);
+        // --- LÓGICA DE MIEMBROS ---
+        const existingMember = membersMap.get(normalizedId);
+
+        const newReference: Reference | null = entry.handwrittenRequest && entry.handwrittenRequest.trim().length > 0 
+          ? {
+              id: Date.now().toString() + Math.random().toString().slice(2),
+              date: date,
+              text: entry.handwrittenRequest.trim(),
+            }
+          : null;
+
+        if (existingMember) {
+          const hasRefForDate = existingMember.references.some(r => r.date === date);
+          let updatedRefs = existingMember.references;
+
+          if (newReference && !hasRefForDate) {
+              updatedRefs = [newReference, ...existingMember.references];
+          } else if (newReference && hasRefForDate) {
+              updatedRefs = existingMember.references.map(r => r.date === date ? newReference : r);
+          }
+
+          const updatedMember: Member & { userId: string } = {
+            ...existingMember,
+            company: entry.company || existingMember.company,
+            sector: entry.sector || existingMember.sector,
+            phone: entry.phone || existingMember.phone,
+            references: updatedRefs,
+            userId: user.id
+          };
+
+          await setDoc(doc(db, "members", normalizedId), updatedMember);
+
+        } else {
+          const newMember: Member & { userId: string } = {
+            id: normalizedId,
+            userId: user.id,
+            name: entry.name,
+            company: entry.company,
+            sector: entry.sector,
+            phone: entry.phone,
+            createdAt: new Date().toISOString(),
+            references: newReference ? [newReference] : []
+          };
+          await setDoc(doc(db, "members", normalizedId), newMember);
+        }
       }
     }
   }, [user, members]);
@@ -169,47 +211,43 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateLastScanEntry = useCallback(async (index: number, field: keyof ExtractedEntry, value: string) => {
     if (!lastScan || !user) return;
 
-    // 1. Actualizar Last Scan en Firestore
+    // 1. Actualizar Last Scan
     const updatedEntries = [...lastScan.entries];
     // @ts-ignore
     updatedEntries[index][field] = value;
-    
     await setDoc(doc(db, "lastScans", user.id), { ...lastScan, entries: updatedEntries });
 
-    // 2. Sincronizar con el perfil del miembro en Firestore
+    // 2. Sincronizar si es Miembro (Los invitados no se editan desde aquí por ahora)
     const entry = updatedEntries[index];
-    
-    // GENERACIÓN DE ID ÚNICO (Misma lógica que en addOrUpdateMembers)
-    const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
-    const normalizedId = `${user.id}_${cleanName}`;
+    if (!entry.isGuest) {
+        const cleanName = entry.name.trim().toLowerCase().replace(/\s+/g, '-');
+        const normalizedId = `${user.id}_${cleanName}`;
+        const member = members.find(m => m.id === normalizedId);
 
-    const member = members.find(m => m.id === normalizedId);
+        if (member) {
+            const scanDate = lastScan.date;
+            const updates: any = {};
 
-    if (member) {
-      const scanDate = lastScan.date;
-      const updates: any = {};
+            if (field === 'company') updates.company = value;
+            if (field === 'sector') updates.sector = value;
+            if (field === 'phone') updates.phone = value;
 
-      if (field === 'company') updates.company = value;
-      if (field === 'sector') updates.sector = value;
-      if (field === 'phone') updates.phone = value;
+            if (field === 'handwrittenRequest') {
+                const refIndex = member.references.findIndex(r => r.date === scanDate);
+                let newRefs = [...member.references];
+                if (refIndex >= 0) {
+                    newRefs[refIndex] = { ...newRefs[refIndex], text: value };
+                } else if (value.trim().length > 0) {
+                    newRefs = [{ id: Date.now().toString(), date: scanDate, text: value }, ...newRefs];
+                }
+                updates.references = newRefs;
+            }
 
-      if (field === 'handwrittenRequest') {
-        const refIndex = member.references.findIndex(r => r.date === scanDate);
-        let newRefs = [...member.references];
-        
-        if (refIndex >= 0) {
-           newRefs[refIndex] = { ...newRefs[refIndex], text: value };
-        } else if (value.trim().length > 0) {
-           newRefs = [{ id: Date.now().toString(), date: scanDate, text: value }, ...newRefs];
+            if (Object.keys(updates).length > 0) {
+                await updateDoc(doc(db, "members", normalizedId), updates);
+            }
         }
-        updates.references = newRefs;
-      }
-
-      if (Object.keys(updates).length > 0) {
-        await updateDoc(doc(db, "members", normalizedId), updates);
-      }
     }
-
   }, [lastScan, user, members]);
 
   const clearAll = useCallback(async () => {
@@ -223,15 +261,22 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const membersRef = collection(db, "members");
       const q = query(membersRef, where("userId", "==", user.id));
       const snapshot = await getDocs(q); 
-      
       const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
+      
+      // 3. Borrar invitados
+      const guestsRef = collection(db, "guests");
+      const qGuests = query(guestsRef, where("userId", "==", user.id));
+      const snapshotGuests = await getDocs(qGuests);
+      const deleteGuestPromises = snapshotGuests.docs.map(doc => deleteDoc(doc.ref));
+
+      await Promise.all([...deletePromises, ...deleteGuestPromises]);
     }
   }, [user]);
 
   return (
     <DataContext.Provider value={{ 
       members, 
+      guests,
       lastScan, 
       addOrUpdateMembers, 
       getMember, 

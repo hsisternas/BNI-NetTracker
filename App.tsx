@@ -1,15 +1,17 @@
+
 import React from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { DataProvider } from './context/DataContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Scanner } from './components/Scanner';
 import { MemberDirectory } from './components/MemberDirectory';
+import { GuestDirectory } from './components/GuestDirectory';
 import { MemberDetail } from './components/MemberDetail';
 import { LastScan } from './components/LastScan';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { AdminPanel } from './components/AdminPanel';
-import { Users, Scan, Menu, X, LayoutGrid, ClipboardList, LogOut, Shield } from 'lucide-react';
+import { Users, Scan, Menu, X, LayoutGrid, ClipboardList, LogOut, Shield, UserPlus } from 'lucide-react';
 
 const SidebarLink = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
   const location = useLocation();
@@ -56,6 +58,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         
         <nav className="flex-1 p-4 space-y-2">
           <SidebarLink to="/" icon={Users} label="Miembros" />
+          <SidebarLink to="/guests" icon={UserPlus} label="Invitados" />
           <SidebarLink to="/scan" icon={Scan} label="Escanear Hoja" />
           <SidebarLink to="/summary" icon={ClipboardList} label="Resumen Semanal" />
           {isAdmin && (
@@ -126,6 +129,11 @@ const AppRoutes = () => {
             <Route path="/" element={
                 <ProtectedRoute>
                     <MemberDirectory />
+                </ProtectedRoute>
+            } />
+            <Route path="/guests" element={
+                <ProtectedRoute>
+                    <GuestDirectory />
                 </ProtectedRoute>
             } />
             <Route path="/scan" element={

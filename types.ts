@@ -1,3 +1,4 @@
+
 export interface Reference {
   id: string;
   date: string; // ISO Date string YYYY-MM-DD
@@ -15,6 +16,18 @@ export interface Member {
   references: Reference[];
 }
 
+export interface Guest {
+  id: string;
+  name: string;
+  company: string;
+  sector: string;
+  phone: string;
+  invitedByMemberId: string;
+  invitedByMemberName: string;
+  visitDate: string;
+  userId: string;
+}
+
 // The raw structure returned by Gemini
 export interface ExtractedEntry {
   rowNumber: number;
@@ -23,6 +36,8 @@ export interface ExtractedEntry {
   sector: string;
   phone: string;
   handwrittenRequest: string;
+  isGuest?: boolean;
+  invitedByName?: string;
 }
 
 export interface ProcessedSheetResult {
